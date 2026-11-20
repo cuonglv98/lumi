@@ -41,9 +41,18 @@ fun EmbedPlayer(
     title: String?,
     modifier: Modifier,
     onEnded: () -> Unit,
+    fullscreen: Boolean,
+    onFullscreenRequest: (Boolean) -> Unit,
 ) {
     val currentOnEnded by rememberUpdatedState(onEnded)
+    val currentOnFullscreenRequest by rememberUpdatedState(onFullscreenRequest)
+
     var webView by remember { mutableStateOf<WebView?>(null) }
+
+    // Lumi đổi toàn màn hình (nút ⛶ / vuốt quay lại) → báo cho YouTube để nút của nó đổi đúng biểu tượng
+    LaunchedEffect(webView, fullscreen) {
+        webView?.evaluateJavascript("window.lumiSetFullscreen && window.lumiSetFullscreen($fullscreen);", null)
+    }
 
     LaunchedEffect(title) { EmbedPlayback.updateTitle(title) }
 
@@ -71,12 +80,28 @@ fun EmbedPlayer(
                 settings.javaScriptEnabled = true
                 settings.domStorageEnabled = true
                 settings.mediaPlaybackRequiresUserGesture = false // tự phát ngay
-                addJavascriptInterface(EmbedBridge { post { currentOnEnded() } }, "Lumi")
+                addJavascriptInterface(
+                    EmbedBridge(
+                        ended = { post { currentOnEnded() } },
+                        fullscreen = { on -> post { currentOnFullscreenRequest(on) } },
+                    ),
+                    "Lumi",
+                )
                 // Bắt buộc với video HTML5: thiếu WebChromeClient thì WebView chỉ có tiếng, hình bị đen
                 webChromeClient = object : WebChromeClient() {
                     // Ảnh chờ mặc định của WebView là nút play xám to → thay bằng ảnh trong suốt
                     override fun getDefaultVideoPoster(): Bitmap =
                         Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888)
+
+                    /**
+                     * Dự phòng: nếu trang vẫn gọi được toàn màn hình gốc của WebView (tách video ra cửa sổ
+                     * riêng) thì bỏ đi và dùng toàn màn hình của Lumi. Bình thường đoạn mã gài sẵn
+                     * (INJECT_JS) đã bắt lệnh toàn màn hình từ trước.
+                     */
+                    override fun onShowCustomView(view: View, callback: CustomViewCallback) {
+                        callback.onCustomViewHidden()
+                        post { currentOnFullscreenRequest(true) }
+                    }
                 }
                 webViewClient = object : WebViewClient() {
                     override fun onPageStarted(view: WebView, url: String?, favicon: Bitmap?) {
@@ -114,12 +139,19 @@ fun EmbedPlayer(
 private const val ORIGIN = "https://dev.lumi.player"
 
 private fun embedUrl(videoId: String) =
-    "https://www.youtube.com/embed/$videoId?autoplay=1&playsinline=1&rel=0&fs=0&enablejsapi=1&origin=$ORIGIN"
+    "https://www.youtube.com/embed/$videoId?autoplay=1&playsinline=1&rel=0&fs=1&enablejsapi=1&origin=$ORIGIN"
 
 /** Cầu nối JavaScript → Kotlin. */
-private class EmbedBridge(private val ended: () -> Unit) {
+private class EmbedBridge(
+    private val ended: () -> Unit,
+    private val fullscreen: (Boolean) -> Unit,
+) {
     @JavascriptInterface
     fun onEnded() = ended()
+
+    /** Trình phát YouTube xin vào/thoát toàn màn hình (người dùng bấm nút của YouTube). */
+    @JavascriptInterface
+    fun fullscreen(on: Boolean) = fullscreen.invoke(on)
 
     @JavascriptInterface
     fun status(position: Double, duration: Double, paused: Boolean) =
@@ -160,6 +192,30 @@ private const val INJECT_JS = """
   HTMLMediaElement.prototype.pause = function () {
     if (window.__lumiBg) return;
     return originalPause.apply(this, arguments);
+  };
+  // Toàn màn hình: Lumi tự làm (phóng WebView, xoay ngang). Trang chỉ cần "tưởng" là đang toàn màn hình
+  // để trình phát YouTube đổi giao diện và biểu tượng nút cho đúng.
+  var fsElement = null;
+  function setFs(el) {
+    fsElement = el;
+    ['fullscreenchange', 'webkitfullscreenchange'].forEach(function (n) { document.dispatchEvent(new Event(n)); });
+  }
+  try {
+    ['fullscreenElement', 'webkitFullscreenElement', 'webkitCurrentFullScreenElement'].forEach(function (n) {
+      Object.defineProperty(document, n, { get: function () { return fsElement; }, configurable: true });
+    });
+    Object.defineProperty(document, 'webkitIsFullScreen', { get: function () { return !!fsElement; }, configurable: true });
+    ['fullscreenEnabled', 'webkitFullscreenEnabled'].forEach(function (n) {
+      Object.defineProperty(document, n, { get: function () { return true; }, configurable: true });
+    });
+  } catch (e) {}
+  Element.prototype.requestFullscreen = Element.prototype.webkitRequestFullscreen =
+    Element.prototype.webkitRequestFullScreen = function () { setFs(this); Lumi.fullscreen(true); return Promise.resolve(); };
+  document.exitFullscreen = document.webkitExitFullscreen = document.webkitCancelFullScreen =
+    function () { setFs(null); Lumi.fullscreen(false); return Promise.resolve(); };
+  window.lumiSetFullscreen = function (on) {
+    if (on === !!fsElement) return;
+    setFs(on ? (document.getElementById('movie_player') || document.documentElement) : null);
   };
   window.lumiToggle = function () {
     var v = document.querySelector('video');

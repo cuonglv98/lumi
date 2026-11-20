@@ -86,7 +86,18 @@ fun WatchScreen(
     /** Báo vị trí ô video cho trình phát nhúng (nằm ở tầng ngoài cùng của app) đặt vào. */
     onEmbedSlot: (Rect?) -> Unit,
 ) {
-    if (fullscreen && !embedActive) {
+    if (fullscreen && embedActive) {
+        // Toàn màn hình với trình phát nhúng: ô đen phủ kín màn hình, trình phát nhúng phủ lên trên
+        DisposableEffect(Unit) { onDispose { onEmbedSlot(null) } }
+        Box(
+            Modifier
+                .fillMaxSize()
+                .background(Color.Black)
+                .onGloballyPositioned { onEmbedSlot(it.boundsInRoot()) },
+        )
+        return
+    }
+    if (fullscreen) {
         Box(Modifier.fillMaxSize().background(Color.Black)) {
             VideoSurface(player, fullscreen = true, snapshot.isPlaying, onFullscreenChange, Modifier.fillMaxSize())
         }
@@ -100,6 +111,10 @@ fun WatchScreen(
                 Row(Modifier.background(Color.Black).statusBarsPadding().fillMaxWidth()) {
                     IconButton(onClick = onMinimize) {
                         Icon(painterResource(R.drawable.ic_expand_more), contentDescription = "Thu nhỏ", tint = Color.White)
+                    }
+                    Spacer(Modifier.weight(1f))
+                    IconButton(onClick = { onFullscreenChange(true) }) {
+                        Icon(painterResource(R.drawable.ic_fullscreen), contentDescription = "Toàn màn hình", tint = Color.White)
                     }
                 }
                 DisposableEffect(Unit) { onDispose { onEmbedSlot(null) } }

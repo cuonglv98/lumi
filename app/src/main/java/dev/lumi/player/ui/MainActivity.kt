@@ -369,6 +369,11 @@ class MainActivity : ComponentActivity() {
                                     }
                                 }
                             },
+                            fullscreen = fullscreen,
+                            onFullscreenRequest = { on ->
+                                if (on) watchOpen = true
+                                if (on != fullscreen) changeFullscreen(on)
+                            },
                         )
                     }
                 }
