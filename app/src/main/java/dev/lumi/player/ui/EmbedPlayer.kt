@@ -5,7 +5,9 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.util.Log
 import android.view.View
+import android.view.ViewGroup
 import android.webkit.JavascriptInterface
+import android.webkit.WebChromeClient
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.compose.runtime.Composable
@@ -63,10 +65,19 @@ fun EmbedPlayer(
         modifier = modifier,
         factory = { context ->
             BackgroundWebView(context).apply {
+                // Compose mặc định tạo View kiểu WRAP_CONTENT → WebView báo trang "chiều cao khung = 0"
+                // → trình phát YouTube (cao 100%) bị thu về cao 0: có tiếng, có nút, nhưng hình đen.
+                layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
                 settings.javaScriptEnabled = true
                 settings.domStorageEnabled = true
                 settings.mediaPlaybackRequiresUserGesture = false // tự phát ngay
                 addJavascriptInterface(EmbedBridge { post { currentOnEnded() } }, "Lumi")
+                // Bắt buộc với video HTML5: thiếu WebChromeClient thì WebView chỉ có tiếng, hình bị đen
+                webChromeClient = object : WebChromeClient() {
+                    // Ảnh chờ mặc định của WebView là nút play xám to → thay bằng ảnh trong suốt
+                    override fun getDefaultVideoPoster(): Bitmap =
+                        Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888)
+                }
                 webViewClient = object : WebViewClient() {
                     override fun onPageStarted(view: WebView, url: String?, favicon: Bitmap?) {
                         view.evaluateJavascript(INJECT_JS, null)
