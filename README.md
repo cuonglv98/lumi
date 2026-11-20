@@ -45,6 +45,8 @@ Bấm video ─► MediaController ──► PlaybackService (foreground service
 | Nhập từ Google Takeout | Chọn file .zip / subscriptions.csv / .json; tự lấy ảnh kênh |
 | Báo cập nhật thư viện | Mỗi ngày hỏi GitHub; có bản NewPipeExtractor mới → thông báo + dải báo ở Trang chủ |
 | Từ khoá bị YouTube chặn | Vd "faptv": tự tìm lại bằng "faptv video" và ghi chú cho người dùng |
+| Video «dành cho trẻ em» | YouTube chặn mọi app ngoài lấy luồng → Lumi tự chuyển sang trình phát nhúng chính thức (WebView); vẫn nghe khi thu nhỏ / tắt màn hình |
+| Tự cập nhật app | GitHub Actions build sẵn khi có NewPipeExtractor mới → app báo "Lumi có bản mới" → bấm Cập nhật |
 | Tự phục hồi | Link bị thu hồi (HTTP 403) → lấy link mới, phát tiếp đúng chỗ; video hỏng → bỏ qua |
 
 ## Cấu trúc mã
@@ -92,6 +94,15 @@ YouTube thay đổi thường xuyên. Gần như mọi lỗi kiểu "HTTP 403", 
 2. Sửa `newpipeExtractor = "v0.x.y"` trong `gradle/libs.versions.toml`
 3. Build lại. Nếu báo lỗi biên dịch, thường là API trong `YoutubeRequestAdapter.kt` hoặc `StreamResolver.kt` đổi tên.
 
+## Tự cập nhật
+
+- Code ở https://github.com/cuonglv98/lumi. `.github/workflows/release.yml` chạy mỗi ngày 8:00 (giờ VN):
+  có NewPipeExtractor mới thì sửa `libs.versions.toml`, build APK đã ký, đăng lên Releases (tag `build-<số>`).
+- App đọc Releases, hiện "Lumi có bản mới", bấm Cập nhật để tải và cài.
+- Build ngay: tab Actions → "Build & phát hành" → Run workflow.
+- Chìa khoá ký: `C:/Users/Admin/.lumi/lumi-release.jks` (mật khẩu trong `keystore.properties`, không đưa lên git;
+  bản sao trong GitHub Secrets). **Mất chìa khoá thì không cập nhật đè được nữa** — hãy sao lưu file này.
+
 ## Môi trường build
 
 - Gradle 9.9.2 (tải từ GitHub mirror vì `services.gradle.org` chậm ở mạng này), AGP 9.5.1, Kotlin 2.4.21
@@ -102,7 +113,7 @@ YouTube thay đổi thường xuyên. Gần như mọi lỗi kiểu "HTTP 403", 
 
 - Kéo thả sắp xếp hàng chờ; lưu hàng chờ khi tắt app
 - Chất lượng mặc định riêng cho Wi‑Fi và 4G
-- Video «dành cho trẻ em» chưa phát được (giới hạn của NewPipeExtractor v0.27.1) — có nút mở bằng app YouTube
+- Video «dành cho trẻ em» (trình phát nhúng): YouTube tự chọn chất lượng, có thể có quảng cáo, chưa tự phát bài liên quan
 - Tách Shorts khỏi feed kênh đăng ký
 - Picture-in-Picture, hẹn giờ tắt
 - Tự lấy lại link khi link hết hạn (~6 giờ) nếu tạm dừng quá lâu

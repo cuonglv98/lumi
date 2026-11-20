@@ -52,7 +52,16 @@ import dev.lumi.player.extractor.ChannelSummary
 import dev.lumi.player.extractor.VideoItem
 import dev.lumi.player.history.WatchHistory
 import dev.lumi.player.library.SubscriptionStore
+import dev.lumi.player.player.EmbedPlayback
 import dev.lumi.player.player.LumiCommands
+import dev.lumi.player.extractor.VideoRepository
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.size
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.dp
+import kotlin.math.roundToInt
 import dev.lumi.player.player.LumiSettings
 import dev.lumi.player.player.PlaybackService
 import dev.lumi.player.player.queueInsertIndex
@@ -89,6 +98,7 @@ class MainActivity : ComponentActivity() {
     private var defaultQuality by mutableStateOf(720)
     private var checkingUpdate by mutableStateOf(false)
     private var appBannerDismissed by mutableStateOf(false)
+    private var embedSlot by mutableStateOf<Rect?>(null)
     private var inForeground = false
     private var pendingSharedUrl: String? = null
 
@@ -124,6 +134,12 @@ class MainActivity : ComponentActivity() {
                 val appRelease by AppUpdates.latest.collectAsState()
                 val downloadState by AppUpdates.download.collectAsState()
                 val banner = homeBanner(appRelease, downloadState, updateBanner)
+                // Video YouTube không cho lấy luồng (vd «dành cho trẻ em») → trình phát nhúng chính thức
+                val embedVideoId = snapshot.mediaId
+                    ?.takeIf { snapshot.errorOpenExternally }
+                    ?.let(VideoRepository::videoIdOf)
+                val embedState by EmbedPlayback.state.collectAsState()
+                val playerProgress = rememberPlaybackProgress(controller)
                 val dark = isSystemInDarkTheme()
                 val subscribedIds = remember(subscriptions) { subscriptions.mapTo(HashSet()) { channelIdOf(it.url) } }
                 val isSubscribed: (String?) -> Boolean = { url -> url != null && channelIdOf(url) in subscribedIds }
@@ -189,10 +205,17 @@ class MainActivity : ComponentActivity() {
                             Column {
                                 if (snapshot.hasMedia) {
                                     MiniPlayer(
-                                        snapshot = snapshot,
-                                        progress = rememberPlaybackProgress(controller),
+                                        snapshot = if (embedVideoId != null) {
+                                            snapshot.copy(isPlaying = embedState.playing, isLoading = false)
+                                        } else {
+                                            snapshot
+                                        },
+                                        progress = if (embedVideoId != null) embedState.progress else playerProgress,
                                         onOpen = { watchOpen = true },
-                                        onPlayPause = { controller?.let { if (it.isPlaying) it.pause() else it.play() } },
+                                        onPlayPause = {
+                                            if (embedVideoId != null) EmbedPlayback.toggle()
+                                            else controller?.let { if (it.isPlaying) it.pause() else it.play() }
+                                        },
                                         onClose = {
                                             controller?.stop()
                                             controller?.clearMediaItems()
@@ -315,6 +338,37 @@ class MainActivity : ComponentActivity() {
                             onFullscreenChange = ::changeFullscreen,
                             onRetry = ::retry,
                             onMinimize = { watchOpen = false },
+                            embedActive = embedVideoId != null,
+                            onEmbedSlot = { embedSlot = it },
+                        )
+                    }
+
+                    // Trình phát nhúng ở tầng ngoài cùng: phủ lên ô video khi mở màn xem,
+                    // thu về 1 điểm ảnh khi thu nhỏ (vẫn phát tiếp, điều khiển qua mini-player).
+                    if (embedVideoId != null) {
+                        val density = LocalDensity.current
+                        val slot = embedSlot.takeIf { watchOpen }
+                        EmbedPlayer(
+                            videoId = embedVideoId,
+                            title = snapshot.title,
+                            modifier = if (slot != null) {
+                                with(density) {
+                                    Modifier
+                                        .offset { IntOffset(slot.left.roundToInt(), slot.top.roundToInt()) }
+                                        .size(slot.width.toDp(), slot.height.toDp())
+                                }
+                            } else {
+                                Modifier.size(1.dp)
+                            },
+                            onEnded = {
+                                controller?.run {
+                                    if (hasNextMediaItem()) {
+                                        seekToNextMediaItem()
+                                        prepare()
+                                        play()
+                                    }
+                                }
+                            },
                         )
                     }
                 }

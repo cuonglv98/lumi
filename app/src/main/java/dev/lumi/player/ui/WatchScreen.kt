@@ -55,6 +55,10 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.ui.PlayerView
 import dev.lumi.player.R
 import dev.lumi.player.extractor.ChannelSummary
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
 
 /** Trang xem video: trình phát ở trên, thông tin + hàng chờ + "Tiếp theo" ở dưới. */
 @Composable
@@ -77,8 +81,12 @@ fun WatchScreen(
     onFullscreenChange: (Boolean) -> Unit,
     onRetry: () -> Unit,
     onMinimize: () -> Unit,
+    /** Đang phát bằng trình phát nhúng (video «dành cho trẻ em»). */
+    embedActive: Boolean,
+    /** Báo vị trí ô video cho trình phát nhúng (nằm ở tầng ngoài cùng của app) đặt vào. */
+    onEmbedSlot: (Rect?) -> Unit,
 ) {
-    if (fullscreen) {
+    if (fullscreen && !embedActive) {
         Box(Modifier.fillMaxSize().background(Color.Black)) {
             VideoSurface(player, fullscreen = true, snapshot.isPlaying, onFullscreenChange, Modifier.fillMaxSize())
         }
@@ -87,16 +95,33 @@ fun WatchScreen(
 
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         Column(Modifier.fillMaxSize()) {
-            Box(Modifier.background(Color.Black).statusBarsPadding()) {
-                VideoSurface(
-                    player,
-                    fullscreen = false,
-                    snapshot.isPlaying,
-                    onFullscreenChange,
-                    Modifier.fillMaxWidth().aspectRatio(16f / 9f),
+            if (embedActive) {
+                // Trình phát nhúng phủ đúng lên ô đen này (nút thu nhỏ để ở hàng trên vì YouTube vẽ đè lên video)
+                Row(Modifier.background(Color.Black).statusBarsPadding().fillMaxWidth()) {
+                    IconButton(onClick = onMinimize) {
+                        Icon(painterResource(R.drawable.ic_expand_more), contentDescription = "Thu nhỏ", tint = Color.White)
+                    }
+                }
+                DisposableEffect(Unit) { onDispose { onEmbedSlot(null) } }
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .aspectRatio(16f / 9f)
+                        .background(Color.Black)
+                        .onGloballyPositioned { onEmbedSlot(it.boundsInRoot()) },
                 )
-                IconButton(onClick = onMinimize, modifier = Modifier.align(Alignment.TopStart)) {
-                    Icon(painterResource(R.drawable.ic_expand_more), contentDescription = "Thu nhỏ", tint = Color.White)
+            } else {
+                Box(Modifier.background(Color.Black).statusBarsPadding()) {
+                    VideoSurface(
+                        player,
+                        fullscreen = false,
+                        snapshot.isPlaying,
+                        onFullscreenChange,
+                        Modifier.fillMaxWidth().aspectRatio(16f / 9f),
+                    )
+                    IconButton(onClick = onMinimize, modifier = Modifier.align(Alignment.TopStart)) {
+                        Icon(painterResource(R.drawable.ic_expand_more), contentDescription = "Thu nhỏ", tint = Color.White)
+                    }
                 }
             }
 
@@ -119,7 +144,18 @@ fun WatchScreen(
                         onShare = onShare,
                     )
                 }
-                snapshot.error?.let { message ->
+                if (embedActive) {
+                    item(key = "embed-note") {
+                        Text(
+                            "Video «dành cho trẻ em» — đang phát bằng trình phát nhúng của YouTube " +
+                                "(YouTube tự chọn chất lượng và có thể chèn quảng cáo).",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                        )
+                    }
+                }
+                snapshot.error?.takeIf { !embedActive }?.let { message ->
                     item(key = "error") {
                         ErrorCard(message, onRetry, onOpenExternally.takeIf { snapshot.errorOpenExternally })
                     }

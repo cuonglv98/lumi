@@ -195,6 +195,9 @@ class PlaybackService : MediaSessionService() {
                 refreshCurrent()
                 return
             }
+            // Video YouTube không cho lấy luồng (vd «dành cho trẻ em") → giao diện phát bằng
+            // trình phát nhúng, nên KHÔNG tự bỏ qua; hết video nhúng giao diện sẽ chuyển bài.
+            if (error.isEmbedOnly()) return
             if (player.hasNextMediaItem() && consecutiveErrorSkips < MAX_ERROR_SKIPS) {
                 consecutiveErrorSkips++
                 Log.w(TAG, "Bỏ qua video lỗi: ${error.message}")
@@ -416,6 +419,16 @@ class PlaybackService : MediaSessionService() {
                 if (player.getMediaItemAt(i).isAutoplay) player.removeMediaItem(i)
             }
         }
+    }
+
+    private fun PlaybackException.isEmbedOnly(): Boolean {
+        var cause: Throwable? = this
+        while (cause != null) {
+            val message = cause.message.orEmpty()
+            if (message.contains("UNPLAYABLE") || message.contains("not available", ignoreCase = true)) return true
+            cause = cause.cause
+        }
+        return false
     }
 
     private fun PlaybackException.isHttpForbidden(): Boolean {

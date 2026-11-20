@@ -91,10 +91,16 @@ object StreamResolver {
             StreamInfo.getInfo(ServiceList.YouTube, url)
         } catch (e: Exception) {
             Log.e(TAG, "Không lấy được thông tin video", e)
+            // Video bị chặn (vd «dành cho trẻ em») vẫn có tiêu đề/kênh/ảnh qua oEmbed — cổng công khai
+            // YouTube dành cho việc nhúng video → giao diện + thông báo hiển thị đúng
+            val embed = oEmbed(url)
             return ResolvedVideo(
-                "", "", null,
+                embed?.optString("title").orEmpty(),
+                embed?.optString("author_name").orEmpty(),
+                embed?.optString("thumbnail_url")?.ifEmpty { null },
                 PlaybackPlan.Failed(e.message ?: e.javaClass.simpleName),
                 emptyList(),
+                VideoDetails(channelUrl = embed?.optString("author_url")?.ifEmpty { null }),
             )
         }
         return ResolvedVideo(
@@ -149,6 +155,17 @@ object StreamResolver {
         if (info.hlsUrl.isNotEmpty()) return PlaybackPlan.Hls(info.hlsUrl)
         if (info.dashMpdUrl.isNotEmpty()) return PlaybackPlan.Dash(info.dashMpdUrl)
         return PlaybackPlan.Failed("Không tìm thấy luồng phát phù hợp cho video này")
+    }
+
+    private fun oEmbed(videoUrl: String): org.json.JSONObject? = try {
+        val request = okhttp3.Request.Builder()
+            .url("https://www.youtube.com/oembed?format=json&url=" + java.net.URLEncoder.encode(videoUrl, "UTF-8"))
+            .build()
+        OkHttpDownloader.instance.client.newCall(request).execute().use { response ->
+            if (response.isSuccessful) org.json.JSONObject(response.body.string()) else null
+        }
+    } catch (e: Exception) {
+        null
     }
 
     /** Mô tả YouTube là HTML (có link, xuống dòng <br>) → chuyển thành chữ thường. */
