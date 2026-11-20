@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Thư mục chứa APK bản cập nhật, chia sẻ cho trình cài đặt của Android -->
+<paths>
+    <cache-path name="updates" path="updates/" />
+</paths>

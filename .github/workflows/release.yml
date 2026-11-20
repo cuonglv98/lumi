@@ -1,0 +1,100 @@
+# Tự động build Lumi khi NewPipeExtractor có bản mới.
+#
+# - Chạy mỗi ngày lúc 8:00 sáng giờ Việt Nam (01:00 UTC).
+# - Có bản NewPipeExtractor mới → sửa gradle/libs.versions.toml, build APK, đăng lên Releases.
+# - App Lumi trên điện thoại thấy bản mới trong Releases → hiện nút "Cập nhật".
+# - Bấm "Run workflow" trên tab Actions để build ngay (vd sau khi sửa code).
+# - Nếu bản thư viện mới đổi API làm build lỗi, GitHub gửi email báo → cần sửa code bằng tay.
+#
+# Cần 2 Secrets trong Settings → Secrets and variables → Actions:
+#   LUMI_KEYSTORE_BASE64   file chìa khoá ký app, mã hoá base64
+#   LUMI_KEYSTORE_PASSWORD mật khẩu chìa khoá
+name: Build & phát hành
+
+on:
+  schedule:
+    - cron: "0 1 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Kiểm tra NewPipeExtractor mới
+        id: npe
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          current=$(grep -oP '^newpipeExtractor = "\K[^"]+' gradle/libs.versions.toml)
+          latest=$(gh api repos/TeamNewPipe/NewPipeExtractor/releases/latest --jq .tag_name)
+          echo "Đang dùng: $current — Mới nhất: $latest"
+          highest=$(printf '%s\n%s\n' "${current#v}" "${latest#v}" | sort -V | tail -1)
+          if [ "$latest" != "$current" ] && [ "v$highest" = "$latest" ]; then
+            sed -i "s/^newpipeExtractor = \".*\"/newpipeExtractor = \"$latest\"/" gradle/libs.versions.toml
+            echo "bumped=true" >> "$GITHUB_OUTPUT"
+            echo "version=$latest" >> "$GITHUB_OUTPUT"
+          else
+            echo "bumped=false" >> "$GITHUB_OUTPUT"
+            echo "version=$current" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Chạy theo lịch mà không có gì mới → dừng ở đây (không build, không đăng gì)
+      - name: Quyết định có build không
+        id: gate
+        run: |
+          if [ "${{ steps.npe.outputs.bumped }}" = "true" ] || [ "${{ github.event_name }}" != "schedule" ]; then
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "build=false" >> "$GITHUB_OUTPUT"
+            echo "Không có bản NewPipeExtractor mới — bỏ qua."
+          fi
+
+      - uses: actions/setup-java@v5
+        if: steps.gate.outputs.build == 'true'
+        with:
+          distribution: temurin
+          java-version: 21
+          cache: gradle
+
+      - name: Build APK
+        if: steps.gate.outputs.build == 'true'
+        env:
+          LUMI_KEYSTORE_BASE64: ${{ secrets.LUMI_KEYSTORE_BASE64 }}
+          LUMI_KEYSTORE_PASSWORD: ${{ secrets.LUMI_KEYSTORE_PASSWORD }}
+          LUMI_KEY_ALIAS: lumi
+        run: |
+          export LUMI_KEYSTORE_PATH="$RUNNER_TEMP/lumi-release.jks"
+          echo "$LUMI_KEYSTORE_BASE64" | base64 -d > "$LUMI_KEYSTORE_PATH"
+          export LUMI_VERSION_CODE=$((100 + GITHUB_RUN_NUMBER))
+          export LUMI_VERSION_NAME="1.$GITHUB_RUN_NUMBER (${{ steps.npe.outputs.version }})"
+          echo "LUMI_VERSION_CODE=$LUMI_VERSION_CODE" >> "$GITHUB_ENV"
+          chmod +x gradlew
+          ./gradlew --no-configuration-cache --console=plain :app:assembleRelease
+          rm -f "$LUMI_KEYSTORE_PATH"
+          cp app/build/outputs/apk/release/app-release.apk "lumi-$LUMI_VERSION_CODE.apk"
+
+      - name: Lưu số phiên bản thư viện mới vào repo
+        if: steps.gate.outputs.build == 'true' && steps.npe.outputs.bumped == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "Cập nhật NewPipeExtractor lên ${{ steps.npe.outputs.version }}"
+          git push
+
+      - name: Đăng bản phát hành
+        if: steps.gate.outputs.build == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "build-$LUMI_VERSION_CODE" "lumi-$LUMI_VERSION_CODE.apk" \
+            --title "Lumi build $LUMI_VERSION_CODE (NewPipeExtractor ${{ steps.npe.outputs.version }})" \
+            --notes "extractor=${{ steps.npe.outputs.version }}"

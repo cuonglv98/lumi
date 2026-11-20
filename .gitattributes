@@ -1,0 +1,5 @@
+# Giữ xuống dòng kiểu Linux (LF) — gradlew trên máy chủ GitHub (Linux) sẽ lỗi nếu là CRLF
+* text=auto eol=lf
+*.bat text eol=crlf
+*.jar binary
+*.png binary
